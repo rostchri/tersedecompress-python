@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tersedecompress"
+version = "1.0.0"
+description = "Python port of IBM z/OS TERSE decompression (PACK and SPACK algorithms)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Open Mainframe Project", email = "openmainframeproject@linuxfoundation.org" },
+]
+keywords = ["ibm", "zos", "mainframe", "terse", "decompress", "ebcdic"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Archiving :: Compression",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.3.4",
+]
+
+[project.scripts]
+tersedecompress = "tersedecompress.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
