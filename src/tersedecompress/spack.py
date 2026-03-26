@@ -42,26 +42,16 @@ class SpackDecompresser(TerseDecompresser):
         in_stream: BinaryIO,
         out_stream: BinaryIO,
         header: TerseHeader,
+        *,
+        max_output_bytes: int | None = None,
     ) -> None:
-        super().__init__(in_stream, out_stream, header)
+        super().__init__(in_stream, out_stream, header, max_output_bytes=max_output_bytes)
 
         self._node: int = 0
         self._tree_avail: int = 0
         self._tree: list[_TreeRecord] = [_TreeRecord() for _ in range(TREESIZE + 1)]
         self._stack_head: int = 0
         self._stack_data: list[int] = [0] * (STACKSIZE + 1)
-
-        # Instance variables for BumpRef (mirrors Java field declarations)
-        self._forwards: int = 0
-        self._prev: int = 0
-
-        # Instance variables for LruKill
-        self._lru_p: int = 0
-        self._lru_q: int = 0
-        self._lru_r: int = 0
-
-        # Instance variable for LruAdd
-        self._lru_back: int = 0
 
     # ------------------------------------------------------------------
     # Tree management
@@ -92,8 +82,17 @@ class SpackDecompresser(TerseDecompresser):
         self._tree_avail = CODESIZE + 1
 
     def _get_tree_node(self) -> int:
-        """Remove and return the first node from the free list."""
+        """Remove and return the first node from the free list.
+
+        Raises:
+            IOError: If the free-list head is out of the valid node range,
+                     indicating corrupt input.
+        """
         node = self._tree_avail
+        if not (0 <= node < TREESIZE):
+            raise IOError(
+                f"SPACK tree node index out of range: {node} (corrupt input)"
+            )
         self._tree_avail = self._tree[node].next_count
         self._node = node
         return node
@@ -109,24 +108,24 @@ class SpackDecompresser(TerseDecompresser):
         if tree[bref].next_count < 0:
             tree[bref].next_count -= 1
         else:
-            self._forwards = tree[bref].next_count
-            self._prev = tree[bref].back
-            tree[self._prev].next_count = self._forwards
-            tree[self._forwards].back = self._prev
+            forwards: int = tree[bref].next_count
+            prev: int = tree[bref].back
+            tree[prev].next_count = forwards
+            tree[forwards].back = prev
             tree[bref].next_count = -1
 
     def _lru_kill(self) -> None:
         """Evict the least-recently-used node from the tree."""
         tree = self._tree
-        self._lru_p = tree[0].next_count
-        self._lru_q = tree[self._lru_p].next_count
-        self._lru_r = tree[self._lru_p].back
-        tree[self._lru_q].back = self._lru_r
-        tree[self._lru_r].next_count = self._lru_q
-        self._delete_ref(tree[self._lru_p].left)
-        self._delete_ref(tree[self._lru_p].right)
-        tree[self._lru_p].next_count = self._tree_avail
-        self._tree_avail = self._lru_p
+        lru_p: int = tree[0].next_count
+        lru_q: int = tree[lru_p].next_count
+        lru_r: int = tree[lru_p].back
+        tree[lru_q].back = lru_r
+        tree[lru_r].next_count = lru_q
+        self._delete_ref(tree[lru_p].left)
+        self._delete_ref(tree[lru_p].right)
+        tree[lru_p].next_count = self._tree_avail
+        self._tree_avail = lru_p
 
     def _delete_ref(self, dref: int) -> None:
         """Decrement the reference count, and re-add to LRU if it drops to zero."""
@@ -139,11 +138,11 @@ class SpackDecompresser(TerseDecompresser):
     def _lru_add(self, lru_next: int) -> None:
         """Append *lru_next* to the back (most-recently-used) of the LRU list."""
         tree = self._tree
-        self._lru_back = tree[BASE].back
+        lru_back: int = tree[BASE].back
         tree[lru_next].next_count = BASE
         tree[BASE].back = lru_next
-        tree[lru_next].back = self._lru_back
-        tree[self._lru_back].next_count = lru_next
+        tree[lru_next].back = lru_back
+        tree[lru_back].next_count = lru_next
 
     # ------------------------------------------------------------------
     # Output helper
@@ -167,6 +166,8 @@ class SpackDecompresser(TerseDecompresser):
         while True:
             while x > CODESIZE:
                 self._stack_head += 1
+                if self._stack_head > STACKSIZE:
+                    raise IOError("SPACK stack overflow: corrupt input")
                 stack_data[self._stack_head] = self._tree[x].right
                 x = self._tree[x].left
 

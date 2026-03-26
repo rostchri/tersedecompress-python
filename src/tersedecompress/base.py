@@ -28,6 +28,8 @@ class TerseDecompresser(ABC):
         in_stream: BinaryIO,
         out_stream: BinaryIO,
         header: TerseHeader,
+        *,
+        max_output_bytes: int | None = None,
     ) -> None:
         self.record_length: int = header.record_length
         self.host_flag: bool = header.host_flag
@@ -39,6 +41,8 @@ class TerseDecompresser(ABC):
         self._record = bytearray()
 
         self._line_separator: bytes = b"\n"
+        self._max_output_bytes: int | None = max_output_bytes
+        self._output_bytes_written: int = 0
 
     # ------------------------------------------------------------------
     # Abstract interface
@@ -57,12 +61,21 @@ class TerseDecompresser(ABC):
         cls,
         in_stream: BinaryIO,
         out_stream: BinaryIO,
+        *,
+        text_mode: bool | None = None,
+        max_output_bytes: int | None = None,
     ) -> "TerseDecompresser":
         """Parse the header and return the appropriate decompressor.
 
         Args:
-            in_stream:  Opened binary input stream (tersed data).
-            out_stream: Opened binary output stream (decompressed data).
+            in_stream:        Opened binary input stream (tersed data).
+            out_stream:       Opened binary output stream (decompressed data).
+            text_mode:        If provided, overrides the header's text_flag.
+                              Pass True for EBCDIC→ASCII + newlines, False for
+                              raw binary output.  If None, the header value is used.
+            max_output_bytes: If set, raise IOError when the total decompressed
+                              output would exceed this many bytes.  None (default)
+                              means no limit (backwards-compatible).
 
         Returns:
             A :class:`PackDecompresser` or :class:`SpackDecompresser` instance.
@@ -72,11 +85,13 @@ class TerseDecompresser(ABC):
         from .spack import SpackDecompresser
 
         header = TerseHeader.check_header(in_stream)
+        if text_mode is not None:
+            header.text_flag = text_mode
 
         if not header.spack_flag:
-            return PackDecompresser(in_stream, out_stream, header)
+            return PackDecompresser(in_stream, out_stream, header, max_output_bytes=max_output_bytes)
         else:
-            return SpackDecompresser(in_stream, out_stream, header)
+            return SpackDecompresser(in_stream, out_stream, header, max_output_bytes=max_output_bytes)
 
     # ------------------------------------------------------------------
     # Output helpers
@@ -87,19 +102,39 @@ class TerseDecompresser(ABC):
 
         For VB binary mode, writes a 4-byte RDW (Record Descriptor Word)
         before the record data.  For text mode, appends the line separator.
+
+        Raises:
+            IOError: If a max_output_bytes limit has been set and would be
+                     exceeded by writing this record.
         """
         if self.variable_flag and not self.text_flag:
             # Write a RDW: length = record_data_length + 4 (includes RDW itself)
             # Java: int rdw = recordlength << 16  (top 16 bits = length, low 16 = 0)
             record_length_with_rdw = len(self._record) + 4
             rdw = (record_length_with_rdw << 16) & 0xFFFFFFFF
-            self._out.write(struct.pack(">I", rdw))
+            rdw_bytes = struct.pack(">I", rdw)
+            self._check_output_limit(len(rdw_bytes))
+            self._out.write(rdw_bytes)
+            self._output_bytes_written += len(rdw_bytes)
 
-        self._out.write(bytes(self._record))
+        self._check_output_limit(len(self._record))
+        self._out.write(self._record)
+        self._output_bytes_written += len(self._record)
         self._record = bytearray()
 
         if self.text_flag:
+            self._check_output_limit(len(self._line_separator))
             self._out.write(self._line_separator)
+            self._output_bytes_written += len(self._line_separator)
+
+    def _check_output_limit(self, additional: int) -> None:
+        """Raise IOError if writing *additional* bytes would exceed the limit."""
+        if self._max_output_bytes is not None:
+            if self._output_bytes_written + additional > self._max_output_bytes:
+                raise IOError(
+                    f"Decompression bomb protection: output would exceed "
+                    f"{self._max_output_bytes} bytes"
+                )
 
     def put_char(self, x: int) -> None:
         """Write a single logical character to the current record.

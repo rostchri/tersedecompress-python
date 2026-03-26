@@ -17,10 +17,21 @@ class TerseBlockReader:
     The format packs two 12-bit values into 3 bytes:
       - First call: reads 2 bytes, returns high 12 bits, saves low 4 bits
       - Second call: reads 1 more byte, combines saved 4 bits + 8 new bits
+
+    The underlying stream is wrapped in a BufferedReader if it does not
+    already provide buffering, to avoid per-byte syscall overhead.
     """
 
+    _BUFFER_SIZE: int = 8192
+
     def __init__(self, stream: BinaryIO) -> None:
-        self._stream = stream
+        # Wrap in BufferedReader only when the stream has no internal buffer.
+        # io.RawIOBase subclasses (e.g. FileIO) benefit from buffering;
+        # BytesIO and BufferedReader already buffer internally.
+        if isinstance(stream, io.RawIOBase):
+            self._stream: BinaryIO = io.BufferedReader(stream, self._BUFFER_SIZE)  # type: ignore[arg-type]
+        else:
+            self._stream = stream
         self._bits_available: int = 0
         self._saved_bits: int = 0
 

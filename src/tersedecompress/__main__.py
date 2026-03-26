@@ -15,11 +15,19 @@ matching the behaviour of the original Java CLI.
 """
 
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 
 from . import __version__
 from .core import decompress_file
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(levelname)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -69,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
 
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"Error: input file not found: {input_path}", file=sys.stderr)
+        logger.error("input file not found: %s", input_path)
         return 1
 
     output_path: Path
@@ -78,23 +86,22 @@ def main(argv: list[str] | None = None) -> int:
     elif text_mode:
         output_path = input_path.with_suffix(input_path.suffix + ".txt")
     else:
-        print(
-            "Error: output file required in binary mode (-b)", file=sys.stderr
-        )
+        logger.error("output file required in binary mode (-b)")
         return 1
 
-    print(
-        f"Attempting to decompress input file ({input_path}) "
-        f"to output file ({output_path})"
+    logger.info(
+        "Attempting to decompress input file (%s) to output file (%s)",
+        input_path,
+        output_path,
     )
 
     try:
         decompress_file(input_path, output_path, text_mode=text_mode)
     except Exception as exc:  # noqa: BLE001
-        print(f"Something went wrong, Exception {exc}", file=sys.stderr)
+        logger.error("Something went wrong, Exception %s", exc)
         return 1
 
-    print("Processing completed")
+    logger.info("Processing completed")
     return 0
 
 

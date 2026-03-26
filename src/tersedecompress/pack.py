@@ -21,8 +21,10 @@ class PackDecompresser(TerseDecompresser):
         in_stream: BinaryIO,
         out_stream: BinaryIO,
         header: TerseHeader,
+        *,
+        max_output_bytes: int | None = None,
     ) -> None:
-        super().__init__(in_stream, out_stream, header)
+        super().__init__(in_stream, out_stream, header, max_output_bytes=max_output_bytes)
 
     def decode(self) -> None:
         """Decompress a PACK-encoded TERSE stream.
@@ -67,9 +69,15 @@ class PackDecompresser(TerseDecompresser):
             h = y
             p: int = 0
 
+            _iter_count: int = 0
             while d > 257:
+                _iter_count += 1
+                if _iter_count > TREESIZE:
+                    raise IOError(
+                        "PACK decode: cycle in father[] tree (corrupt input)"
+                    )
                 q = forward[d]
-                r = backward[d]
+                r: int = backward[d]
                 forward[r] = q
                 backward[q] = r
                 forward[d] = h

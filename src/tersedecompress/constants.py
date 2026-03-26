@@ -5,9 +5,11 @@ EBCDIC conversion tables, algorithm constants, and flag definitions.
 Ported from the Java implementation by Iain Lewis (August 2004).
 """
 
+from typing import Final
+
 # EBCDIC to ASCII conversion table (EbcToAscAlmcopy) — use this exact table,
 # NOT Python's codecs.cp037 which has subtle differences.
-EBC_TO_ASC: list[int] = [
+EBC_TO_ASC: Final[tuple[int, ...]] = (
     0x00, 0x01, 0x02, 0x03, 0xCF, 0x09, 0xD3, 0x7F,
     0xD4, 0xD5, 0xC3, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
     0x10, 0x11, 0x12, 0x13, 0xC7, 0xB4, 0x08, 0xC9,
@@ -40,10 +42,10 @@ EBC_TO_ASC: list[int] = [
     0x59, 0x5A, 0xA0, 0x85, 0x8E, 0xE9, 0xE4, 0xD1,
     0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
     0x38, 0x39, 0xB3, 0xF7, 0xF0, 0xFA, 0xA7, 0xFF,
-]
+)
 
 # ASCII to EBCDIC conversion table (AscToEbcDef — used for PACK initialization)
-ASC_TO_EBC_DEF: list[int] = [
+ASC_TO_EBC_DEF: Final[tuple[int, ...]] = (
     0x00, 0x01, 0x02, 0x03, 0x37, 0x2D, 0x2E, 0x2F,
     0x16, 0x05, 0x25, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
     0x10, 0x11, 0x12, 0x13, 0x3C, 0x3D, 0x32, 0x26,
@@ -76,29 +78,29 @@ ASC_TO_EBC_DEF: list[int] = [
     0xCD, 0xED, 0x36, 0x44, 0xCE, 0xCF, 0x31, 0xAA,
     0xFC, 0x9E, 0xAE, 0x8C, 0xDD, 0xDC, 0x39, 0xFB,
     0x80, 0xAF, 0xFD, 0x78, 0x76, 0xB2, 0x9F, 0xFF,
-]
+)
 
 # Algorithm constants
-STACKSIZE: int = 0x07FF   # 2k - 1
-BUFFERSIZE: int = 0x07FF  # 2k - 1
-HASHSIZE: int = 0x0FFF    # 4k - 1
-TREESIZE: int = 0x1000    # 4k
+STACKSIZE: Final[int] = 0x07FF   # 2k - 1
+BUFFERSIZE: Final[int] = 0x07FF  # 2k - 1
+HASHSIZE: Final[int] = 0x0FFF    # 4k - 1
+TREESIZE: Final[int] = 0x1000    # 4k
 
-RECORDMARK: int = 257     # Used in file output functions
+RECORDMARK: Final[int] = 257     # Used in file output functions
 
-BASE: int = 0
-CODESIZE: int = 257       # 2**8+1, EOF, 256 Codepoints, RCM
-ENDOFFILE: int = 0
+BASE: Final[int] = 0
+CODESIZE: Final[int] = 257       # 2**8+1, EOF, 256 Codepoints, RCM
+ENDOFFILE: Final[int] = 0
 
-EOL: str = "\n"
+EOL: Final[str] = "\n"
 
-NONE: int = -1
+NONE: Final[int] = -1
 
 # Flags for the terse file header
-FLAGUNDEF: int = 0x80
-FLAGCC1: int = 0x40
-FLAGCC2: int = 0x20
-FLAGVBS: int = 0x10
-FLAGVS: int = 0x08
-FLAGMVS: int = 0x04
-FLAGRBITS: int = 0x03
+FLAGUNDEF: Final[int] = 0x80
+FLAGCC1: Final[int] = 0x40
+FLAGCC2: Final[int] = 0x20
+FLAGVBS: Final[int] = 0x10
+FLAGVS: Final[int] = 0x08
+FLAGMVS: Final[int] = 0x04
+FLAGRBITS: Final[int] = 0x03
