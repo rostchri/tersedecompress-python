@@ -24,7 +24,73 @@ from tersedecompress.base import TerseDecompresser
 
 
 # ---------------------------------------------------------------------------
-# Helper
+# File lists (Issues #15 / #17)
+# ---------------------------------------------------------------------------
+
+FB_FILES = [
+    "FB.A.TXT",
+    "FB.AAA.TXT",
+    "FB.ALICE29.TXT",
+    "FB.ALPHABET.TXT",
+    "FB.ASYOULIK.TXT",
+    "FB.BIBLE.TXT",
+    "FB.CP.HTML",
+    "FB.E.COLI",
+    "FB.FIELDS.C",
+    "FB.GRAMMAR.LSP",
+    "FB.KENNEDY.XLS",
+    "FB.LCET10.TXT",
+    "FB.PI.TXT",
+    "FB.PLRABN12.TXT",
+    "FB.PTT5",
+    "FB.RANDOM.TXT",
+    "FB.SUM",
+    "FB.WORLD192.TXT",
+    "FB.XARGS",
+]
+
+VB_FILES = [
+    "VB.BIBLE.TXT",
+    "VB.CP.HTML",
+    "VB.ENWIK8.XML",
+    "VB.FIELDS.C",
+    "VB.GRAMMAR.LSP",
+    "VB.LCET10.TXT",
+    "VB.WORLD192.TXT",
+    "VB.XARGS",
+    "VB.A.TXT",
+    "VB.AAA.TXT",
+    "VB.ALPHABET.TXT",
+    "VB.E.COLI",
+    "VB.PI.TXT",
+    "VB.RANDOM.TXT",
+    "VB.ALICE29.TXT",
+    "VB.ASYOULIK.TXT",
+    "VB.PLRABN12.TXT",
+]
+
+ALL_FILES = FB_FILES + VB_FILES
+
+# Files only present in binary test suite (no text counterpart in ZOSTEXT)
+BINARY_ONLY_FILES = {
+    "FB.ALICE29.TXT",
+    "FB.ASYOULIK.TXT",
+    "FB.KENNEDY.XLS",
+    "FB.PLRABN12.TXT",
+    "FB.PTT5",
+    "FB.SUM",
+    "VB.ENWIK8.XML",
+    "VB.ALICE29.TXT",
+    "VB.ASYOULIK.TXT",
+    "VB.PLRABN12.TXT",
+}
+
+# Known-broken in AMATERSE SPACK (skip for both binary and text)
+SPACK_SKIP = {"FB.A.TXT", "VB.A.TXT"}
+
+
+# ---------------------------------------------------------------------------
+# Helpers (Issues #2 / #17)
 # ---------------------------------------------------------------------------
 
 
@@ -32,8 +98,7 @@ def _decompress(tersed_path: Path, *, text_mode: bool) -> bytes:
     """Decompress *tersed_path* and return the raw output bytes."""
     out = io.BytesIO()
     with tersed_path.open("rb") as f:
-        with TerseDecompresser.create(f, out) as d:
-            d.text_flag = text_mode
+        with TerseDecompresser.create(f, out, text_mode=text_mode) as d:
             d.decode()
     return out.getvalue()
 
@@ -55,408 +120,68 @@ def _run_text_test(tersed_dir: Path, text_dir: Path, file: str, algo: str) -> No
 
 
 # ---------------------------------------------------------------------------
-# PACK binary tests (36 tests)
+# PACK binary tests — parametrized (Issue #15)
 # ---------------------------------------------------------------------------
 
 
-class TestBinaryPack:
-    def test_pack_binary_01(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.A.TXT", "PACK")
-
-    def test_pack_binary_02(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.AAA.TXT", "PACK")
-
-    def test_pack_binary_03(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ALICE29.TXT", "PACK")
-
-    def test_pack_binary_04(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ALPHABET.TXT", "PACK")
-
-    def test_pack_binary_05(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ASYOULIK.TXT", "PACK")
-
-    def test_pack_binary_06(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.BIBLE.TXT", "PACK")
-
-    def test_pack_binary_07(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.CP.HTML", "PACK")
-
-    def test_pack_binary_08(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.E.COLI", "PACK")
-
-    def test_pack_binary_09(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.FIELDS.C", "PACK")
-
-    def test_pack_binary_10(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.GRAMMAR.LSP", "PACK")
-
-    def test_pack_binary_11(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.KENNEDY.XLS", "PACK")
-
-    def test_pack_binary_12(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.LCET10.TXT", "PACK")
-
-    def test_pack_binary_13(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PI.TXT", "PACK")
-
-    def test_pack_binary_14(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PLRABN12.TXT", "PACK")
-
-    def test_pack_binary_15(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PTT5", "PACK")
-
-    def test_pack_binary_16(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.RANDOM.TXT", "PACK")
-
-    def test_pack_binary_17(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.SUM", "PACK")
-
-    def test_pack_binary_18(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.WORLD192.TXT", "PACK")
-
-    def test_pack_binary_19(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.XARGS", "PACK")
-
-    def test_pack_binary_20(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.BIBLE.TXT", "PACK")
-
-    def test_pack_binary_21(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.CP.HTML", "PACK")
-
-    def test_pack_binary_22(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ENWIK8.XML", "PACK")
-
-    def test_pack_binary_23(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.FIELDS.C", "PACK")
-
-    def test_pack_binary_24(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.GRAMMAR.LSP", "PACK")
-
-    def test_pack_binary_25(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.LCET10.TXT", "PACK")
-
-    def test_pack_binary_26(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.WORLD192.TXT", "PACK")
-
-    def test_pack_binary_27(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.XARGS", "PACK")
-
-    def test_pack_binary_28(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.A.TXT", "PACK")
-
-    def test_pack_binary_29(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.AAA.TXT", "PACK")
-
-    def test_pack_binary_30(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ALPHABET.TXT", "PACK")
-
-    def test_pack_binary_31(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.E.COLI", "PACK")
-
-    def test_pack_binary_32(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.PI.TXT", "PACK")
-
-    def test_pack_binary_33(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.RANDOM.TXT", "PACK")
-
-    def test_pack_binary_34(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ALICE29.TXT", "PACK")
-
-    def test_pack_binary_35(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ASYOULIK.TXT", "PACK")
-
-    def test_pack_binary_36(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.PLRABN12.TXT", "PACK")
+@pytest.mark.parametrize("filename", ALL_FILES)
+def test_pack_binary(tersed_dir: Path, binary_dir: Path, filename: str) -> None:
+    _run_binary_test(tersed_dir, binary_dir, filename, "PACK")
 
 
 # ---------------------------------------------------------------------------
-# SPACK binary tests (35 tests — FB.A.TXT and VB.A.TXT are known-broken)
+# SPACK binary tests — parametrized, known-broken skipped (Issue #15)
 # ---------------------------------------------------------------------------
 
 
-class TestBinarySpack:
-    # FB.A.TXT.SPACK — known-broken (AMATERSE compression artefact on z/OS)
-    @pytest.mark.skip(reason="Known-broken: AMATERSE SPACK compression artefact")
-    def test_spack_binary_01(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.A.TXT", "SPACK")
-
-    def test_spack_binary_02(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.AAA.TXT", "SPACK")
-
-    def test_spack_binary_03(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ALICE29.TXT", "SPACK")
-
-    def test_spack_binary_04(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ALPHABET.TXT", "SPACK")
-
-    def test_spack_binary_05(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.ASYOULIK.TXT", "SPACK")
-
-    def test_spack_binary_06(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.BIBLE.TXT", "SPACK")
-
-    def test_spack_binary_07(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.CP.HTML", "SPACK")
-
-    def test_spack_binary_08(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.E.COLI", "SPACK")
-
-    def test_spack_binary_09(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.FIELDS.C", "SPACK")
-
-    def test_spack_binary_10(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.GRAMMAR.LSP", "SPACK")
-
-    def test_spack_binary_11(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.KENNEDY.XLS", "SPACK")
-
-    def test_spack_binary_12(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.LCET10.TXT", "SPACK")
-
-    def test_spack_binary_13(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PI.TXT", "SPACK")
-
-    def test_spack_binary_14(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PLRABN12.TXT", "SPACK")
-
-    def test_spack_binary_15(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.PTT5", "SPACK")
-
-    def test_spack_binary_16(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.RANDOM.TXT", "SPACK")
-
-    def test_spack_binary_17(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.SUM", "SPACK")
-
-    def test_spack_binary_18(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.WORLD192.TXT", "SPACK")
-
-    def test_spack_binary_19(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "FB.XARGS", "SPACK")
-
-    def test_spack_binary_20(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.BIBLE.TXT", "SPACK")
-
-    def test_spack_binary_21(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.CP.HTML", "SPACK")
-
-    def test_spack_binary_22(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ENWIK8.XML", "SPACK")
-
-    def test_spack_binary_23(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.FIELDS.C", "SPACK")
-
-    def test_spack_binary_24(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.GRAMMAR.LSP", "SPACK")
-
-    def test_spack_binary_25(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.LCET10.TXT", "SPACK")
-
-    def test_spack_binary_26(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.WORLD192.TXT", "SPACK")
-
-    def test_spack_binary_27(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.XARGS", "SPACK")
-
-    # VB.A.TXT.SPACK — known-broken (AMATERSE compression artefact on z/OS)
-    @pytest.mark.skip(reason="Known-broken: AMATERSE SPACK compression artefact")
-    def test_spack_binary_28(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.A.TXT", "SPACK")
-
-    def test_spack_binary_29(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.AAA.TXT", "SPACK")
-
-    def test_spack_binary_30(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ALPHABET.TXT", "SPACK")
-
-    def test_spack_binary_31(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.E.COLI", "SPACK")
-
-    def test_spack_binary_32(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.PI.TXT", "SPACK")
-
-    def test_spack_binary_33(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.RANDOM.TXT", "SPACK")
-
-    def test_spack_binary_34(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ALICE29.TXT", "SPACK")
-
-    def test_spack_binary_35(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.ASYOULIK.TXT", "SPACK")
-
-    def test_spack_binary_36(self, tersed_dir, binary_dir):
-        _run_binary_test(tersed_dir, binary_dir, "VB.PLRABN12.TXT", "SPACK")
+@pytest.mark.parametrize(
+    "filename",
+    [
+        pytest.param(
+            f,
+            marks=pytest.mark.skip(
+                reason="Known-broken: AMATERSE SPACK compression artefact"
+            ),
+        )
+        if f in SPACK_SKIP
+        else f
+        for f in ALL_FILES
+    ],
+)
+def test_spack_binary(tersed_dir: Path, binary_dir: Path, filename: str) -> None:
+    _run_binary_test(tersed_dir, binary_dir, filename, "SPACK")
 
 
 # ---------------------------------------------------------------------------
-# PACK text tests (26 tests)
+# PACK text tests — parametrized, binary-only files skipped (Issue #15)
 # ---------------------------------------------------------------------------
 
+TEXT_FILES = [f for f in ALL_FILES if f not in BINARY_ONLY_FILES]
 
-class TestTextPack:
-    def test_pack_text_01(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.A.TXT", "PACK")
 
-    def test_pack_text_02(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.AAA.TXT", "PACK")
-
-    def test_pack_text_04(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.ALPHABET.TXT", "PACK")
-
-    def test_pack_text_06(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.BIBLE.TXT", "PACK")
-
-    def test_pack_text_07(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.CP.HTML", "PACK")
-
-    def test_pack_text_08(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.E.COLI", "PACK")
-
-    def test_pack_text_09(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.FIELDS.C", "PACK")
-
-    def test_pack_text_10(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.GRAMMAR.LSP", "PACK")
-
-    def test_pack_text_12(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.LCET10.TXT", "PACK")
-
-    def test_pack_text_13(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.PI.TXT", "PACK")
-
-    def test_pack_text_16(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.RANDOM.TXT", "PACK")
-
-    def test_pack_text_18(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.WORLD192.TXT", "PACK")
-
-    def test_pack_text_19(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.XARGS", "PACK")
-
-    def test_pack_text_20(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.BIBLE.TXT", "PACK")
-
-    def test_pack_text_21(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.CP.HTML", "PACK")
-
-    def test_pack_text_23(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.FIELDS.C", "PACK")
-
-    def test_pack_text_24(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.GRAMMAR.LSP", "PACK")
-
-    def test_pack_text_25(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.LCET10.TXT", "PACK")
-
-    def test_pack_text_26(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.WORLD192.TXT", "PACK")
-
-    def test_pack_text_27(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.XARGS", "PACK")
-
-    def test_pack_text_28(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.A.TXT", "PACK")
-
-    def test_pack_text_29(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.AAA.TXT", "PACK")
-
-    def test_pack_text_30(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.ALPHABET.TXT", "PACK")
-
-    def test_pack_text_31(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.E.COLI", "PACK")
-
-    def test_pack_text_32(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.PI.TXT", "PACK")
-
-    def test_pack_text_33(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.RANDOM.TXT", "PACK")
+@pytest.mark.parametrize("filename", TEXT_FILES)
+def test_pack_text(tersed_dir: Path, text_dir: Path, filename: str) -> None:
+    _run_text_test(tersed_dir, text_dir, filename, "PACK")
 
 
 # ---------------------------------------------------------------------------
-# SPACK text tests (25 tests — FB.A.TXT and VB.A.TXT are known-broken)
+# SPACK text tests — parametrized, known-broken + binary-only skipped (Issue #15)
 # ---------------------------------------------------------------------------
 
 
-class TestTextSpack:
-    # FB.A.TXT.SPACK — known-broken
-    @pytest.mark.skip(reason="Known-broken: AMATERSE SPACK compression artefact")
-    def test_spack_text_01(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.A.TXT", "SPACK")
-
-    def test_spack_text_02(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.AAA.TXT", "SPACK")
-
-    def test_spack_text_04(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.ALPHABET.TXT", "SPACK")
-
-    def test_spack_text_06(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.BIBLE.TXT", "SPACK")
-
-    def test_spack_text_07(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.CP.HTML", "SPACK")
-
-    def test_spack_text_08(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.E.COLI", "SPACK")
-
-    def test_spack_text_09(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.FIELDS.C", "SPACK")
-
-    def test_spack_text_10(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.GRAMMAR.LSP", "SPACK")
-
-    def test_spack_text_12(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.LCET10.TXT", "SPACK")
-
-    def test_spack_text_13(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.PI.TXT", "SPACK")
-
-    def test_spack_text_16(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.RANDOM.TXT", "SPACK")
-
-    def test_spack_text_18(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.WORLD192.TXT", "SPACK")
-
-    def test_spack_text_19(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "FB.XARGS", "SPACK")
-
-    def test_spack_text_20(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.BIBLE.TXT", "SPACK")
-
-    def test_spack_text_21(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.CP.HTML", "SPACK")
-
-    def test_spack_text_23(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.FIELDS.C", "SPACK")
-
-    def test_spack_text_24(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.GRAMMAR.LSP", "SPACK")
-
-    def test_spack_text_25(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.LCET10.TXT", "SPACK")
-
-    def test_spack_text_26(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.WORLD192.TXT", "SPACK")
-
-    def test_spack_text_27(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.XARGS", "SPACK")
-
-    # VB.A.TXT.SPACK — known-broken
-    @pytest.mark.skip(reason="Known-broken: AMATERSE SPACK compression artefact")
-    def test_spack_text_28(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.A.TXT", "SPACK")
-
-    def test_spack_text_29(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.AAA.TXT", "SPACK")
-
-    def test_spack_text_30(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.ALPHABET.TXT", "SPACK")
-
-    def test_spack_text_31(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.E.COLI", "SPACK")
-
-    def test_spack_text_32(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.PI.TXT", "SPACK")
-
-    def test_spack_text_33(self, tersed_dir, text_dir):
-        _run_text_test(tersed_dir, text_dir, "VB.RANDOM.TXT", "SPACK")
+@pytest.mark.parametrize(
+    "filename",
+    [
+        pytest.param(
+            f,
+            marks=pytest.mark.skip(
+                reason="Known-broken: AMATERSE SPACK compression artefact"
+            ),
+        )
+        if f in SPACK_SKIP
+        else f
+        for f in TEXT_FILES
+    ],
+)
+def test_spack_text(tersed_dir: Path, text_dir: Path, filename: str) -> None:
+    _run_text_test(tersed_dir, text_dir, filename, "SPACK")

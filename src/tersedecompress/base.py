@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import BinaryIO
 
 from .block_reader import TerseBlockReader
-from .constants import EBC_TO_ASC, RECORDMARK
+from .constants import EBC_TO_ASC, ENDOFFILE, RECORDMARK
 from .header import TerseHeader
 
 
@@ -97,6 +97,16 @@ class TerseDecompresser(ABC):
     # Output helpers
     # ------------------------------------------------------------------
 
+    def _write_checked(self, data: bytes | bytearray) -> None:
+        """Write *data* to the output stream, checking the output limit first.
+
+        Raises:
+            IOError: If writing *data* would exceed the max_output_bytes limit.
+        """
+        self._check_output_limit(len(data))
+        self._out.write(data)
+        self._output_bytes_written += len(data)
+
     def end_record(self) -> None:
         """Flush the current record buffer to the output stream.
 
@@ -113,19 +123,13 @@ class TerseDecompresser(ABC):
             record_length_with_rdw = len(self._record) + 4
             rdw = (record_length_with_rdw << 16) & 0xFFFFFFFF
             rdw_bytes = struct.pack(">I", rdw)
-            self._check_output_limit(len(rdw_bytes))
-            self._out.write(rdw_bytes)
-            self._output_bytes_written += len(rdw_bytes)
+            self._write_checked(rdw_bytes)
 
-        self._check_output_limit(len(self._record))
-        self._out.write(self._record)
-        self._output_bytes_written += len(self._record)
+        self._write_checked(self._record)
         self._record = bytearray()
 
         if self.text_flag:
-            self._check_output_limit(len(self._line_separator))
-            self._out.write(self._line_separator)
-            self._output_bytes_written += len(self._line_separator)
+            self._write_checked(self._line_separator)
 
     def _check_output_limit(self, additional: int) -> None:
         """Raise IOError if writing *additional* bytes would exceed the limit."""
@@ -145,27 +149,23 @@ class TerseDecompresser(ABC):
         Args:
             x: Value in the range 0..257.
         """
-        if x == 0:
+        if x == ENDOFFILE:
             if self.host_flag and self.text_flag and self.variable_flag:
                 self.end_record()
-        else:
-            if self.host_flag and self.text_flag:
-                if self.variable_flag:
-                    if x == RECORDMARK:
-                        self.end_record()
-                    else:
-                        self._record.append(EBC_TO_ASC[x - 1])
-                else:
-                    self._record.append(EBC_TO_ASC[x - 1])
-                    if len(self._record) == self.record_length:
-                        self.end_record()
-            else:
-                if x == RECORDMARK:
-                    if self.variable_flag:
-                        self.end_record()
-                    # else: discard record marks
-                else:
-                    self._record.append(x - 1)
+            return
+
+        if x == RECORDMARK:
+            if self.variable_flag:
+                self.end_record()
+            # else: FB — discard record marks
+            return
+
+        byte_val = (x - 1) & 0xFF
+        if self.host_flag and self.text_flag:
+            byte_val = EBC_TO_ASC[byte_val]
+        self._record.append(byte_val)
+        if not self.variable_flag and len(self._record) >= self.record_length:
+            self.end_record()
 
     def close(self) -> None:
         """Flush any remaining data and close streams."""
