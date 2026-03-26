@@ -18,7 +18,7 @@ Public API::
 
 import builtins
 from pathlib import Path
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from .base import TerseDecompresser
 from .core import decompress, decompress_file
@@ -26,7 +26,7 @@ from .file import TerseFile
 
 
 def open(
-    source: Union[str, Path, BinaryIO],
+    source: str | Path | BinaryIO,
     text_mode: bool = False,
     max_output_bytes: int | None = None,
 ) -> TerseFile:
@@ -52,12 +52,16 @@ def open(
     """
     if isinstance(source, (str, Path)):
         stream: BinaryIO = builtins.open(Path(source), "rb")  # type: ignore[assignment]
-        return TerseFile(
-            stream,
-            text_mode=text_mode,
-            max_output_bytes=max_output_bytes,
-            _close_source=True,
-        )
+        try:
+            return TerseFile(
+                stream,
+                text_mode=text_mode,
+                max_output_bytes=max_output_bytes,
+                _close_source=True,
+            )
+        except Exception:
+            stream.close()
+            raise
     return TerseFile(
         source,
         text_mode=text_mode,

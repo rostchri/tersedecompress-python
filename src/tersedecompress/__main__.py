@@ -84,6 +84,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pipe mode: read from stdin and write to stdout (shorthand for '- -')",
     )
     parser.add_argument(
+        "--max-output-bytes",
+        type=int,
+        default=None,
+        metavar="BYTES",
+        help="Abort with an error if the decompressed output exceeds BYTES bytes",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -96,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     text_mode: bool = not args.binary
+    max_output_bytes: int | None = args.max_output_bytes
 
     # Resolve pipe mode: --pipe or missing positional args when piping
     pipe_mode = args.pipe
@@ -127,7 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         if output_arg is not None:
             output_path: Path | None = Path(output_arg)
         elif text_mode:
-            assert not use_stdin  # stdin + auto output only supported with -o
+            if use_stdin:
+                raise ValueError("stdin + auto output only supported with an explicit output path (-o)")
             output_path = Path(input_arg).with_suffix(Path(input_arg).suffix + ".txt")
         else:
             logger.error("output file required in binary mode (-b)")
@@ -153,16 +162,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if use_stdin and use_stdout:
-            _stream_to_stream(sys.stdin.buffer, sys.stdout.buffer, text_mode)
+            _stream_to_stream(sys.stdin.buffer, sys.stdout.buffer, text_mode, max_output_bytes)
         elif use_stdin:
-            assert output_path is not None
-            _stream_to_file(sys.stdin.buffer, output_path, text_mode)
+            if output_path is None:
+                raise ValueError("output_path must not be None for stream-to-file mode")
+            _stream_to_file(sys.stdin.buffer, output_path, text_mode, max_output_bytes)
         elif use_stdout:
-            assert not use_stdin
-            _file_to_stream(Path(input_arg), sys.stdout.buffer, text_mode)
+            _file_to_stream(Path(input_arg), sys.stdout.buffer, text_mode, max_output_bytes)
         else:
-            assert output_path is not None
-            decompress_file(Path(input_arg), output_path, text_mode=text_mode)
+            if output_path is None:
+                raise ValueError("output_path must not be None for file-to-file mode")
+            decompress_file(Path(input_arg), output_path, text_mode=text_mode, max_output_bytes=max_output_bytes)
     except Exception as exc:  # noqa: BLE001
         logger.error("Something went wrong, Exception %s", exc)
         return 1
@@ -175,14 +185,13 @@ def _stream_to_stream(
     in_stream: "BinaryIO",
     out_stream: "BinaryIO",
     text_mode: bool,
+    max_output_bytes: int | None = None,
 ) -> None:
     """Decompress from an input stream to an output stream."""
-    import io as _io
-
     from .base import TerseDecompresser
 
     with TerseDecompresser.create(
-        in_stream, out_stream, text_mode=text_mode
+        in_stream, out_stream, text_mode=text_mode, max_output_bytes=max_output_bytes
     ) as d:
         d.decode()
 
@@ -191,6 +200,7 @@ def _stream_to_file(
     in_stream: "BinaryIO",
     output_path: Path,
     text_mode: bool,
+    max_output_bytes: int | None = None,
 ) -> None:
     """Decompress from a binary input stream, writing result to a file."""
     import builtins as _builtins
@@ -199,7 +209,7 @@ def _stream_to_file(
 
     with _builtins.open(output_path, "wb") as out_f:
         with TerseDecompresser.create(
-            in_stream, out_f, text_mode=text_mode
+            in_stream, out_f, text_mode=text_mode, max_output_bytes=max_output_bytes
         ) as d:
             d.decode()
 
@@ -208,6 +218,7 @@ def _file_to_stream(
     input_path: Path,
     out_stream: "BinaryIO",
     text_mode: bool,
+    max_output_bytes: int | None = None,
 ) -> None:
     """Decompress a file, writing result to a binary output stream."""
     import builtins as _builtins
@@ -216,13 +227,12 @@ def _file_to_stream(
 
     with _builtins.open(input_path, "rb") as in_f:
         with TerseDecompresser.create(
-            in_f, out_stream, text_mode=text_mode
+            in_f, out_stream, text_mode=text_mode, max_output_bytes=max_output_bytes
         ) as d:
             d.decode()
 
 
-# Type alias used only for annotations above (avoids circular import at module level)
-from typing import BinaryIO  # noqa: E402
+from typing import BinaryIO  # noqa: E402 — used in annotations above
 
 
 if __name__ == "__main__":

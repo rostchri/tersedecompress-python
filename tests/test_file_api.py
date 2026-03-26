@@ -318,3 +318,61 @@ class TestCliPipeMode:
         result = self._run(["--pipe", "-b"], stdin_data=stdin_data)
         # stdout must start with binary data, not a log line
         assert not result.stdout.startswith(b"INFO")
+
+
+# ---------------------------------------------------------------------------
+# 10. Error-path tests (Issue #22)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorPaths:
+    def test_read_after_close_raises_value_error(self, small_pack_file: Path) -> None:
+        """read() on a closed TerseFile must raise ValueError."""
+        f = tersedecompress.open(small_pack_file)
+        f.close()
+        with pytest.raises(ValueError, match="I/O operation on closed file"):
+            f.read()
+
+    def test_seek_after_close_raises_value_error(self, small_pack_file: Path) -> None:
+        """seek() on a closed TerseFile must raise ValueError."""
+        f = tersedecompress.open(small_pack_file)
+        f.close()
+        with pytest.raises(ValueError, match="I/O operation on closed file"):
+            f.seek(0)
+
+    def test_tell_after_close_raises_value_error(self, small_pack_file: Path) -> None:
+        """tell() on a closed TerseFile must raise ValueError."""
+        f = tersedecompress.open(small_pack_file)
+        f.close()
+        with pytest.raises(ValueError, match="I/O operation on closed file"):
+            f.tell()
+
+    def test_max_output_bytes_exceeded_raises_ioerror(
+        self, small_pack_file: Path, small_pack_binary_expected: bytes
+    ) -> None:
+        """Exceeding max_output_bytes must raise IOError."""
+        limit = max(1, len(small_pack_binary_expected) // 2)
+        with pytest.raises(IOError):
+            with tersedecompress.open(small_pack_file, max_output_bytes=limit) as f:
+                f.read()
+
+    def test_readinto_with_bytearray(
+        self, small_pack_file: Path, small_pack_binary_expected: bytes
+    ) -> None:
+        """readinto() fills a bytearray and returns the number of bytes read."""
+        buf = bytearray(len(small_pack_binary_expected))
+        with tersedecompress.open(small_pack_file) as f:
+            n = f.readinto(buf)
+        assert n == len(small_pack_binary_expected)
+        assert bytes(buf[:n]) == small_pack_binary_expected
+
+    def test_readinto_partial_buffer(
+        self, small_pack_file: Path, small_pack_binary_expected: bytes
+    ) -> None:
+        """readinto() with a smaller buffer reads only as many bytes as the buffer holds."""
+        chunk_size = min(16, len(small_pack_binary_expected))
+        buf = bytearray(chunk_size)
+        with tersedecompress.open(small_pack_file) as f:
+            n = f.readinto(buf)
+        assert n == chunk_size
+        assert bytes(buf) == small_pack_binary_expected[:chunk_size]

@@ -50,7 +50,12 @@ class TerseFile(io.RawIOBase):
     # ------------------------------------------------------------------
 
     def _ensure_decompressed(self) -> None:
-        """Decompress source into the internal buffer if not done yet."""
+        """Decompress source into the internal buffer if not done yet.
+
+        Raises ValueError if the file is already closed.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
         if self._buffer is None:
             raw: bytes = self._source.read()
             decompressed: bytes = decompress(
@@ -83,7 +88,8 @@ class TerseFile(io.RawIOBase):
             Decompressed bytes.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.read(size)
 
     def readinto(self, b: bytearray | memoryview) -> int:
@@ -96,7 +102,8 @@ class TerseFile(io.RawIOBase):
             Number of bytes actually read.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         data: bytes = self._buffer.read(len(b))
         n = len(data)
         b[:n] = data
@@ -113,13 +120,15 @@ class TerseFile(io.RawIOBase):
             New absolute position.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.seek(offset, whence)
 
     def tell(self) -> int:
         """Return the current position in the decompressed stream."""
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.tell()
 
     def close(self) -> None:
