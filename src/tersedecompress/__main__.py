@@ -4,6 +4,10 @@ CLI entry point for tersedecompress.
 Usage:
     python -m tersedecompress <input> <output> [-b] [-t]
     python -m tersedecompress <input> [-t]        # output defaults to <input>.txt
+    python -m tersedecompress <input> -            # stdout
+    python -m tersedecompress - <output>           # stdin
+    python -m tersedecompress - -                  # stdin → stdout
+    python -m tersedecompress --pipe               # stdin → stdout (shorthand)
 
 Options:
     -b    Binary mode (no EBCDIC → ASCII conversion)
@@ -12,6 +16,9 @@ Options:
 
 When neither -b nor -t is specified, text mode is the default,
 matching the behaviour of the original Java CLI.
+
+Use '-' as input or output path to read from stdin / write to stdout.
+--pipe is a shorthand for '- -'.
 """
 
 import argparse
@@ -29,6 +36,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_STDIO_SENTINEL = "-"
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -36,16 +45,23 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Decompress a file compressed using the terse program on z/OS.\n"
             "Default mode is text mode (EBCDIC → ASCII conversion).\n"
-            "If no output file is provided, defaults to <input>.txt"
+            "If no output file is provided, defaults to <input>.txt\n"
+            "Use '-' for stdin (input) or stdout (output).\n"
+            "--pipe is a shorthand for '- -'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input", help="Input tersed file path")
+    parser.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Input tersed file path, or '-' for stdin",
+    )
     parser.add_argument(
         "output",
         nargs="?",
         default=None,
-        help="Output file path (default: <input>.txt in text mode)",
+        help="Output file path, or '-' for stdout (default: <input>.txt in text mode)",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -62,6 +78,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Text mode — EBCDIC → ASCII conversion (default)",
     )
     parser.add_argument(
+        "--pipe",
+        action="store_true",
+        default=False,
+        help="Pipe mode: read from stdin and write to stdout (shorthand for '- -')",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -75,34 +97,132 @@ def main(argv: list[str] | None = None) -> int:
 
     text_mode: bool = not args.binary
 
-    input_path = Path(args.input)
-    if not input_path.exists():
-        logger.error("input file not found: %s", input_path)
-        return 1
-
-    output_path: Path
-    if args.output is not None:
-        output_path = Path(args.output)
-    elif text_mode:
-        output_path = input_path.with_suffix(input_path.suffix + ".txt")
+    # Resolve pipe mode: --pipe or missing positional args when piping
+    pipe_mode = args.pipe
+    if pipe_mode:
+        if args.input is not None and args.input != _STDIO_SENTINEL:
+            logger.error("--pipe cannot be combined with an explicit input path")
+            return 1
+        if args.output is not None and args.output != _STDIO_SENTINEL:
+            logger.error("--pipe cannot be combined with an explicit output path")
+            return 1
+        input_arg = _STDIO_SENTINEL
+        output_arg = _STDIO_SENTINEL
     else:
-        logger.error("output file required in binary mode (-b)")
-        return 1
+        if args.input is None:
+            logger.error("input file required (or use --pipe for stdin)")
+            return 1
+        input_arg = args.input
+        output_arg = args.output
 
-    logger.info(
-        "Attempting to decompress input file (%s) to output file (%s)",
-        input_path,
-        output_path,
-    )
+    use_stdin = input_arg == _STDIO_SENTINEL
+    use_stdout = output_arg == _STDIO_SENTINEL
+
+    # When writing to stdout, suppress INFO logs to avoid polluting the stream
+    if use_stdout:
+        logging.getLogger().setLevel(logging.WARNING)
+
+    # Resolve output when writing to a file
+    if not use_stdout:
+        if output_arg is not None:
+            output_path: Path | None = Path(output_arg)
+        elif text_mode:
+            assert not use_stdin  # stdin + auto output only supported with -o
+            output_path = Path(input_arg).with_suffix(Path(input_arg).suffix + ".txt")
+        else:
+            logger.error("output file required in binary mode (-b)")
+            return 1
+    else:
+        output_path = None
+
+    if not use_stdin:
+        input_path = Path(input_arg)
+        if not input_path.exists():
+            logger.error("input file not found: %s", input_path)
+            return 1
+        logger.info(
+            "Attempting to decompress input file (%s) to output file (%s)",
+            input_path,
+            output_path if output_path is not None else "<stdout>",
+        )
+    else:
+        logger.info(
+            "Attempting to decompress from stdin to %s",
+            output_path if output_path is not None else "<stdout>",
+        )
 
     try:
-        decompress_file(input_path, output_path, text_mode=text_mode)
+        if use_stdin and use_stdout:
+            _stream_to_stream(sys.stdin.buffer, sys.stdout.buffer, text_mode)
+        elif use_stdin:
+            assert output_path is not None
+            _stream_to_file(sys.stdin.buffer, output_path, text_mode)
+        elif use_stdout:
+            assert not use_stdin
+            _file_to_stream(Path(input_arg), sys.stdout.buffer, text_mode)
+        else:
+            assert output_path is not None
+            decompress_file(Path(input_arg), output_path, text_mode=text_mode)
     except Exception as exc:  # noqa: BLE001
         logger.error("Something went wrong, Exception %s", exc)
         return 1
 
     logger.info("Processing completed")
     return 0
+
+
+def _stream_to_stream(
+    in_stream: "BinaryIO",
+    out_stream: "BinaryIO",
+    text_mode: bool,
+) -> None:
+    """Decompress from an input stream to an output stream."""
+    import io as _io
+
+    from .base import TerseDecompresser
+
+    with TerseDecompresser.create(
+        in_stream, out_stream, text_mode=text_mode
+    ) as d:
+        d.decode()
+
+
+def _stream_to_file(
+    in_stream: "BinaryIO",
+    output_path: Path,
+    text_mode: bool,
+) -> None:
+    """Decompress from a binary input stream, writing result to a file."""
+    import builtins as _builtins
+
+    from .base import TerseDecompresser
+
+    with _builtins.open(output_path, "wb") as out_f:
+        with TerseDecompresser.create(
+            in_stream, out_f, text_mode=text_mode
+        ) as d:
+            d.decode()
+
+
+def _file_to_stream(
+    input_path: Path,
+    out_stream: "BinaryIO",
+    text_mode: bool,
+) -> None:
+    """Decompress a file, writing result to a binary output stream."""
+    import builtins as _builtins
+
+    from .base import TerseDecompresser
+
+    with _builtins.open(input_path, "rb") as in_f:
+        with TerseDecompresser.create(
+            in_f, out_stream, text_mode=text_mode
+        ) as d:
+            d.decode()
+
+
+# Type alias used only for annotations above (avoids circular import at module level)
+from typing import BinaryIO  # noqa: E402
 
 
 if __name__ == "__main__":
