@@ -1,9 +1,12 @@
 """File-like interface for reading TERSE-compressed data."""
 
 import io
+import logging
 import queue
 import threading
 from typing import BinaryIO
+
+logger = logging.getLogger(__name__)
 
 from .base import TerseDecompresser
 from .core import decompress
@@ -272,6 +275,12 @@ class TerseStreamFile(io.RawIOBase):
                                 thread** will close the source; ``close()``
                                 does not, to avoid a race.
         """
+        if chunk_buffer_count < 1:
+            raise ValueError(
+                f"chunk_buffer_count must be >= 1 (got {chunk_buffer_count}); "
+                "a value of 0 or negative would create an unbounded queue and "
+                "disable back-pressure"
+            )
         super().__init__()
         self._source: BinaryIO = source
         self._text_mode: bool = text_mode
@@ -350,8 +359,10 @@ class TerseStreamFile(io.RawIOBase):
             if self._close_source:
                 try:
                     self._source.close()
-                except Exception:  # noqa: BLE001 — best-effort; errors are non-actionable
-                    pass
+                except Exception as exc:  # noqa: BLE001 — best-effort close
+                    logger.debug(
+                        "TerseStreamFile: error closing source stream: %s", exc
+                    )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -512,6 +523,16 @@ class TerseStreamFile(io.RawIOBase):
         Source stream ownership: when *_close_source* is True the producer
         thread is the sole owner and closes the source itself.  ``close()``
         must not additionally call ``source.close()`` to avoid a race.
+
+        Blocking precondition:
+            ``close()`` signals the producer via ``_cancel`` which only
+            interrupts the queue-write poll loop.  If the producer is
+            currently blocked inside ``source.read()`` (e.g. a slow socket,
+            FIFO, or NFS stall), ``close()`` will spin in the drain loop
+            until the source read returns.  Callers must ensure the source
+            stream can be interrupted or will complete within a reasonable
+            time.  The producer is a daemon thread, so it will never prevent
+            interpreter shutdown.
         """
         if not self.closed:
             # Signal the producer to abort its queue.put() poll loop.

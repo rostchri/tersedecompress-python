@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 import tersedecompress
+from tersedecompress import decompress
 from tersedecompress.file import TerseStreamFile
 
 
@@ -153,6 +154,16 @@ class TestCloseSynthetic:
         f.close()
         f.close()  # must not raise
         assert f.closed
+
+    def test_chunk_buffer_count_zero_raises(self) -> None:
+        """chunk_buffer_count=0 must raise ValueError (would disable backpressure)."""
+        with pytest.raises(ValueError, match="chunk_buffer_count"):
+            TerseStreamFile(io.BytesIO(_EMPTY_PACK_BYTES), chunk_buffer_count=0)
+
+    def test_chunk_buffer_count_negative_raises(self) -> None:
+        """chunk_buffer_count<0 must raise ValueError."""
+        with pytest.raises(ValueError, match="chunk_buffer_count"):
+            TerseStreamFile(io.BytesIO(_EMPTY_PACK_BYTES), chunk_buffer_count=-1)
 
 
 # ---------------------------------------------------------------------------
