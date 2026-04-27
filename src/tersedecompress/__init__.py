@@ -29,6 +29,7 @@ def open(
     source: str | Path | BinaryIO,
     text_mode: bool = False,
     max_output_bytes: int | None = None,
+    spool_max_bytes: int = 8 * 1024 * 1024,
 ) -> TerseFile:
     """Open a TERSE-compressed file for reading, analogous to gzip.open().
 
@@ -37,6 +38,10 @@ def open(
                           to decompress.
         text_mode:        If True, convert EBCDIC to ASCII during decompression.
         max_output_bytes: Maximum decompressed size (None = unlimited).
+        spool_max_bytes:  Decompressed output is kept in RAM below this
+                          threshold and spilled to a /tmp file above it.
+                          Pass 0 to always use disk; pass None for unlimited
+                          RAM (legacy behaviour).  Default: 8 MB.
 
     Returns:
         TerseFile: A readable, seekable file-like object with decompressed
@@ -57,6 +62,7 @@ def open(
                 stream,
                 text_mode=text_mode,
                 max_output_bytes=max_output_bytes,
+                spool_max_bytes=spool_max_bytes,
                 _close_source=True,
             )
         except Exception:
@@ -66,6 +72,7 @@ def open(
         source,
         text_mode=text_mode,
         max_output_bytes=max_output_bytes,
+        spool_max_bytes=spool_max_bytes,
         _close_source=False,
     )
 
