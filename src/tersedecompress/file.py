@@ -30,7 +30,7 @@ class TerseFile(io.RawIOBase):
         source: BinaryIO,
         text_mode: bool = False,
         max_output_bytes: int | None = None,
-        spool_max_bytes: int = _DEFAULT_SPOOL_MAX_BYTES,
+        spool_max_bytes: int | None = _DEFAULT_SPOOL_MAX_BYTES,
         *,
         _close_source: bool = False,
     ) -> None:
@@ -48,7 +48,7 @@ class TerseFile(io.RawIOBase):
                               spilled to a temporary file in /tmp.
                               Pass 0 to always use a disk file.
                               Pass None to keep everything in RAM (legacy
-                              behaviour).
+                              behaviour, equivalent to old BytesIO path).
                               Default: 8 MB.
             _close_source:    Internal flag — set to True when TerseFile owns
                               the stream and must close it on close().
@@ -131,7 +131,8 @@ class TerseFile(io.RawIOBase):
             Decompressed bytes.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.read(size)
 
     def readinto(self, b: bytearray | memoryview) -> int:
@@ -144,7 +145,8 @@ class TerseFile(io.RawIOBase):
             Number of bytes actually read.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         data: bytes = self._buffer.read(len(b))
         n = len(data)
         b[:n] = data
@@ -161,13 +163,15 @@ class TerseFile(io.RawIOBase):
             New absolute position.
         """
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.seek(offset, whence)
 
     def tell(self) -> int:
         """Return the current position in the decompressed stream."""
         self._ensure_decompressed()
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
         return self._buffer.tell()
 
     def close(self) -> None:

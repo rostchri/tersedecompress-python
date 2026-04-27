@@ -29,7 +29,7 @@ def open(
     source: str | Path | BinaryIO,
     text_mode: bool = False,
     max_output_bytes: int | None = None,
-    spool_max_bytes: int = 8 * 1024 * 1024,
+    spool_max_bytes: int | None = 8 * 1024 * 1024,
 ) -> TerseFile:
     """Open a TERSE-compressed file for reading, analogous to gzip.open().
 
