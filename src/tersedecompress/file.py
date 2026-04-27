@@ -3,7 +3,6 @@
 import io
 import queue
 import threading
-from pathlib import Path
 from typing import BinaryIO
 
 from .base import TerseDecompresser
@@ -151,17 +150,27 @@ class TerseFile(io.RawIOBase):
 
 _QUEUE_SENTINEL: None = None  # typed alias for the EOF marker put on the queue
 
+# Sentinel raised internally to signal cancellation; never stored in _error_box.
+class _CancelledError(Exception):
+    """Internal signal: producer was cancelled by close()."""
+
 
 class _QueueWriter:
     """File-like sink that puts written bytes onto a :class:`queue.Queue`.
 
-    Used as the *out_stream* for :class:`~tersedecompresser.base.TerseDecompresser`
-    inside the producer thread.  The queue provides automatic back-pressure: once
-    the queue reaches *maxsize* the producer blocks on ``put()`` until the
-    consumer drains a slot.
+    Used as the *out_stream* for
+    :class:`~tersedecompress.base.TerseDecompresser` inside the producer
+    thread.  The queue provides automatic back-pressure: once the queue
+    reaches *maxsize* the producer blocks on ``put()`` until the consumer
+    drains a slot.
 
     The writer is intentionally minimal — only ``write()`` and ``flush()``
     are needed by the decompressor.
+
+    Note on polling: ``write()`` polls the queue every 50 ms rather than
+    blocking indefinitely so that ``_cancel`` can be detected promptly on
+    ``close()``.  This is an acceptable trade-off for simplicity; the idle
+    CPU cost is negligible for typical throughput.
     """
 
     def __init__(
@@ -173,19 +182,23 @@ class _QueueWriter:
         self._cancel = cancel_event
 
     def write(self, data: bytes) -> int:
-        """Enqueue *data*, blocking until space is available or cancelled."""
+        """Enqueue *data*, blocking until space is available or cancelled.
+
+        Raises:
+            _CancelledError: If the consumer signals cancellation via the
+                cancel event before a queue slot becomes available.
+        """
         if not data:
             return 0
-        # Block until either there is room in the queue or the consumer has
-        # signalled cancellation (e.g. the TerseStreamFile was closed early).
         while not self._cancel.is_set():
             try:
                 self._queue.put(data, timeout=0.05)
                 return len(data)
             except queue.Full:
                 continue
-        # Cancelled — raise so the producer thread exits promptly.
-        raise IOError("TerseStreamFile: cancelled by consumer")
+        # Raise a private sentinel so _produce() can distinguish
+        # cancellation from a real decompression error.
+        raise _CancelledError()
 
     def flush(self) -> None:  # noqa: D401
         """No-op — queue items are consumed directly by the reader."""
@@ -209,9 +222,17 @@ class TerseStreamFile(io.RawIOBase):
       ``chunk_buffer_count × average_chunk_size``.
     * **Error propagation** — exceptions from the producer thread are
       re-raised in the consumer thread on the next :meth:`read` call.
+      After an error the stream is in a *broken* state; subsequent reads
+      raise :exc:`RuntimeError`.
     * **Clean shutdown** — :meth:`close` signals the producer to stop and
       joins the thread with a short timeout; the thread is a daemon thread
-      as a safety net.
+      as a safety net so interpreter shutdown is never blocked.
+
+    Source ownership:
+
+    * When *_close_source* is ``True`` the **producer thread** is the sole
+      owner and closes the source in its ``finally`` block.  ``close()``
+      must not also call ``source.close()`` to avoid a race.
 
     Usage::
 
@@ -248,8 +269,9 @@ class TerseStreamFile(io.RawIOBase):
                                 stalling but increases peak memory usage.
                                 Default: 64.
             _close_source:      Internal flag — set to True when this
-                                object owns the stream and must close it
-                                on :meth:`close`.
+                                object owns the stream.  The **producer
+                                thread** will close the source; ``close()``
+                                does not, to avoid a race.
         """
         super().__init__()
         self._source: BinaryIO = source
@@ -259,14 +281,19 @@ class TerseStreamFile(io.RawIOBase):
 
         # Queue carries chunks (bytes) or the EOF sentinel (None).
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=chunk_buffer_count)
-        # Signals the producer to abort (set on close() before EOF).
+        # Set by close() to abort the producer's queue.put() poll loop.
         self._cancel: threading.Event = threading.Event()
-        # Producer stores any exception here before putting the sentinel.
-        self._error_box: list[BaseException] = []
+        # Producer stores real (non-cancellation) exceptions here.
+        self._error_box: list[Exception] = []
+        # Set to True once the sentinel has been dequeued; broken if error.
+        self._eof: bool = False
+        self._broken: bool = False
         # Bytes leftover from the previous read() call when size < chunk size.
         self._leftover: bytes = b""
-        self._eof: bool = False
 
+        # daemon=True is a safety net: if the consumer is garbage-collected
+        # without calling close(), the producer will not block interpreter
+        # shutdown.  Proper cleanup relies on close() / the context manager.
         self._thread = threading.Thread(
             target=self._produce,
             name="TerseStreamFile-producer",
@@ -281,9 +308,10 @@ class TerseStreamFile(io.RawIOBase):
     def _produce(self) -> None:
         """Decompress the source and push chunks onto the queue.
 
-        Runs entirely in the background thread.  Any exception is stored
-        in ``_error_box``; the EOF sentinel is always enqueued last so
-        that the consumer can detect end-of-stream.
+        Runs entirely in the background thread.  Real decompression
+        exceptions are stored in ``_error_box``; cancellation (_CancelledError)
+        is silently swallowed so it never reaches ``_error_box``.  The EOF
+        sentinel is always enqueued last so that the consumer unblocks.
         """
         writer = _QueueWriter(self._queue, self._cancel)
         try:
@@ -294,29 +322,31 @@ class TerseStreamFile(io.RawIOBase):
                 max_output_bytes=self._max_output_bytes,
             ) as d:
                 d.decode()
-        except BaseException as exc:  # noqa: BLE001
+        except _CancelledError:
+            # Normal early-close path — not an error; do not store.
+            pass
+        except Exception as exc:
+            # Real decompression / IO error; re-raise on the consumer side.
             self._error_box.append(exc)
         finally:
             # Always enqueue the sentinel so the consumer unblocks.
-            # If the queue is full and we are cancelled we still push the
-            # sentinel with a blocking call — the consumer will drain one
-            # slot when it detects cancellation, so we will not deadlock.
+            # When cancelled the consumer is draining the queue, so we
+            # discard stale items to make room for the sentinel.
             while True:
                 try:
                     self._queue.put(_QUEUE_SENTINEL, timeout=0.05)
                     break
                 except queue.Full:
                     if self._cancel.is_set():
-                        # Consumer is gone; discard remaining items so put()
-                        # succeeds on the next iteration.
                         try:
                             self._queue.get_nowait()
                         except queue.Empty:
                             pass
+            # Close source only once, here in the producer, when we own it.
             if self._close_source:
                 try:
                     self._source.close()
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 — best-effort; errors are non-actionable
                     pass
 
     # ------------------------------------------------------------------
@@ -330,23 +360,27 @@ class TerseStreamFile(io.RawIOBase):
     def _next_chunk(self) -> bytes:
         """Return the next chunk from the queue, or ``b""`` on EOF.
 
-        Checks ``_error_box`` after the sentinel is received and
-        re-raises any producer exception in the consumer thread.
+        After the sentinel is received:
+        - If a real error occurred, sets ``_broken`` and re-raises the
+          exception on every subsequent call.
+        - Otherwise sets ``_eof`` and returns ``b""``.
+
+        Raises:
+            Exception: Any decompression error stored by the producer.
+            RuntimeError: If called again after an error was raised.
         """
+        if self._broken:
+            raise RuntimeError("TerseStreamFile: stream is broken due to a prior error")
         if self._eof:
             return b""
         chunk = self._queue.get()
         if chunk is _QUEUE_SENTINEL:
-            self._eof = True
             if self._error_box:
+                self._broken = True
                 raise self._error_box[0]
+            self._eof = True
             return b""
         return chunk  # type: ignore[return-value]
-
-    def _fill_leftover(self) -> None:
-        """Ensure ``_leftover`` is non-empty (or EOF has been reached)."""
-        while not self._leftover and not self._eof:
-            self._leftover = self._next_chunk()
 
     # ------------------------------------------------------------------
     # io.RawIOBase interface
@@ -377,6 +411,11 @@ class TerseStreamFile(io.RawIOBase):
 
         Returns:
             Decompressed bytes, or ``b""`` at end-of-stream.
+
+        Raises:
+            ValueError: If the file is closed.
+            RuntimeError: If the stream is broken due to a prior error.
+            Exception: Any decompression error propagated from the producer.
         """
         self._check_closed()
         if size == 0:
@@ -407,7 +446,7 @@ class TerseStreamFile(io.RawIOBase):
                 self._leftover = self._leftover[remaining:]
                 remaining = 0
 
-        while remaining > 0 and not self._eof:
+        while remaining > 0 and not self._eof and not self._broken:
             chunk = self._next_chunk()
             if not chunk:
                 break
@@ -424,6 +463,10 @@ class TerseStreamFile(io.RawIOBase):
     def readinto(self, b: bytearray | memoryview) -> int:
         """Read bytes into a pre-allocated buffer.
 
+        Note: this implementation allocates an intermediate ``bytes`` object.
+        For allocation-critical paths, prefer ``read()`` directly into a
+        ``bytearray``.
+
         Args:
             b: A writable buffer (bytearray or memoryview).
 
@@ -437,23 +480,29 @@ class TerseStreamFile(io.RawIOBase):
         return n
 
     def close(self) -> None:
-        """Signal the producer thread to stop, then join it."""
+        """Signal the producer thread to stop and join it.
+
+        Source stream ownership: when *_close_source* is True the producer
+        thread is the sole owner and closes the source itself.  ``close()``
+        must not additionally call ``source.close()`` to avoid a race.
+        """
         if not self.closed:
-            # Signal the producer to abort its queue.put() loop.
+            # Signal the producer to abort its queue.put() poll loop.
             self._cancel.set()
-            # Drain the queue so the producer can put the sentinel and exit.
+            # Drain the queue so the producer can enqueue the sentinel and exit.
             while self._thread.is_alive():
                 try:
                     self._queue.get_nowait()
                 except queue.Empty:
                     pass
                 self._thread.join(timeout=0.05)
-            # Final drain in case items arrived after last check.
+            # Final drain in case a last item arrived between the loop check
+            # and the thread exiting.
             while True:
                 try:
                     self._queue.get_nowait()
                 except queue.Empty:
                     break
-            if self._close_source and not self._source.closed:
-                self._source.close()
+            # Source is closed by the producer when _close_source=True.
+            # When _close_source=False the caller owns the source; do not touch it.
         super().close()

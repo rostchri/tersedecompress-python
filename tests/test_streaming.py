@@ -509,21 +509,22 @@ class TestThreadSafety:
 
 class TestMemoryProfile:
     def test_peak_memory_with_large_file(self, large_pack_file: Path) -> None:
-        """Peak RAM during streaming should be far below the full output size."""
+        """Peak RAM during streaming should be far below the full output size.
+
+        Uses tracemalloc.get_traced_memory()[1] (the true peak since tracing
+        started) rather than a snapshot-diff, which only captures allocations
+        that are still alive at snapshot time.
+        """
         full_output = decompress(large_pack_file.read_bytes(), text_mode=False)
 
         tracemalloc.start()
-        snapshot_before = tracemalloc.take_snapshot()
 
         out = io.BytesIO()
         with tersedecompress.open(large_pack_file, streaming=True) as f:
             shutil.copyfileobj(f, out)
 
-        snapshot_after = tracemalloc.take_snapshot()
+        _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
-
-        stats = snapshot_after.compare_to(snapshot_before, "lineno")
-        peak_bytes = sum(s.size_diff for s in stats if s.size_diff > 0)
 
         assert out.getvalue() == full_output
 
@@ -537,21 +538,21 @@ class TestMemoryProfile:
     def test_small_input_low_peak_ram(
         self, pack_bytes: bytes, expected_binary: bytes
     ) -> None:
-        """Streaming a small file stays well under 1 MB peak allocation delta."""
+        """Streaming a small file stays well under 1 MB peak allocation.
+
+        Uses tracemalloc.get_traced_memory()[1] for true peak measurement.
+        """
         tracemalloc.start()
-        snap0 = tracemalloc.take_snapshot()
 
         out = io.BytesIO()
         with TerseStreamFile(io.BytesIO(pack_bytes)) as f:
             shutil.copyfileobj(f, out)
 
-        snap1 = tracemalloc.take_snapshot()
+        _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-        stats = snap1.compare_to(snap0, "lineno")
-        peak_bytes = sum(s.size_diff for s in stats if s.size_diff > 0)
-
         assert out.getvalue() == expected_binary
+        # 1 MB is a very generous ceiling for a small test file.
         assert peak_bytes < 1 * 1024 * 1024, (
             f"Peak allocation {peak_bytes:,} bytes exceeded 1 MB for small input"
         )
