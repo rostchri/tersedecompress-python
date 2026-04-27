@@ -31,7 +31,6 @@ from pathlib import Path
 import pytest
 
 import tersedecompress
-from tersedecompress import decompress
 from tersedecompress.file import TerseStreamFile
 
 
@@ -62,35 +61,9 @@ _EMPTY_PACK_BYTES: bytes = _make_empty_pack_stream()
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: require real test data; skip gracefully when absent
+# Additional fixtures (small_pack_file, pack_bytes, expected_binary,
+# expected_text are provided by conftest.py)
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def small_pack_file(test_data_dir: Path) -> Path:
-    """Return path to FB.AAA.TXT.PACK — the smallest PACK test file."""
-    p = test_data_dir / "TERSED" / "FB.AAA.TXT.PACK"
-    if not p.exists():
-        pytest.skip(f"Test file not found: {p}")
-    return p
-
-
-@pytest.fixture(scope="session")
-def pack_bytes(small_pack_file: Path) -> bytes:
-    """Raw compressed bytes of FB.AAA.TXT.PACK."""
-    return small_pack_file.read_bytes()
-
-
-@pytest.fixture(scope="session")
-def expected_binary(pack_bytes: bytes) -> bytes:
-    """Expected binary decompression output."""
-    return decompress(pack_bytes, text_mode=False)
-
-
-@pytest.fixture(scope="session")
-def expected_text(pack_bytes: bytes) -> bytes:
-    """Expected text-mode decompression output."""
-    return decompress(pack_bytes, text_mode=True)
 
 
 @pytest.fixture(scope="session")

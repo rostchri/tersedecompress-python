@@ -51,10 +51,14 @@ class TerseFile(io.RawIOBase):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _ensure_decompressed(self) -> None:
+    def _ensure_decompressed(self) -> io.BytesIO:
         """Decompress source into the internal buffer if not done yet.
 
-        Raises ValueError if the file is already closed.
+        Returns:
+            The internal BytesIO buffer (guaranteed non-None).
+
+        Raises:
+            ValueError: If the file is already closed.
         """
         if self.closed:
             raise ValueError("I/O operation on closed file")
@@ -66,6 +70,7 @@ class TerseFile(io.RawIOBase):
                 max_output_bytes=self._max_output_bytes,
             )
             self._buffer = io.BytesIO(decompressed)
+        return self._buffer
 
     # ------------------------------------------------------------------
     # io.RawIOBase interface
@@ -89,10 +94,7 @@ class TerseFile(io.RawIOBase):
         Returns:
             Decompressed bytes.
         """
-        self._ensure_decompressed()
-        if self._buffer is None:
-            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
-        return self._buffer.read(size)
+        return self._ensure_decompressed().read(size)
 
     def readinto(self, b: bytearray | memoryview) -> int:
         """Read bytes into a pre-allocated buffer.
@@ -103,10 +105,8 @@ class TerseFile(io.RawIOBase):
         Returns:
             Number of bytes actually read.
         """
-        self._ensure_decompressed()
-        if self._buffer is None:
-            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
-        data: bytes = self._buffer.read(len(b))
+        buf = self._ensure_decompressed()
+        data: bytes = buf.read(len(b))
         n = len(data)
         b[:n] = data
         return n
@@ -121,17 +121,11 @@ class TerseFile(io.RawIOBase):
         Returns:
             New absolute position.
         """
-        self._ensure_decompressed()
-        if self._buffer is None:
-            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
-        return self._buffer.seek(offset, whence)
+        return self._ensure_decompressed().seek(offset, whence)
 
     def tell(self) -> int:
         """Return the current position in the decompressed stream."""
-        self._ensure_decompressed()
-        if self._buffer is None:
-            raise RuntimeError("Internal buffer is unexpectedly None after decompression")
-        return self._buffer.tell()
+        return self._ensure_decompressed().tell()
 
     def close(self) -> None:
         """Close internal buffer and, if owned, the source stream."""
@@ -150,6 +144,11 @@ class TerseFile(io.RawIOBase):
 
 _QUEUE_SENTINEL: None = None  # typed alias for the EOF marker put on the queue
 
+# Poll interval for queue operations.  50 ms is a reasonable balance between
+# shutdown latency and CPU idle cost.
+_QUEUE_TIMEOUT: float = 0.05
+
+
 # Sentinel raised internally to signal cancellation; never stored in _error_box.
 class _CancelledError(Exception):
     """Internal signal: producer was cancelled by close()."""
@@ -167,10 +166,10 @@ class _QueueWriter:
     The writer is intentionally minimal — only ``write()`` and ``flush()``
     are needed by the decompressor.
 
-    Note on polling: ``write()`` polls the queue every 50 ms rather than
-    blocking indefinitely so that ``_cancel`` can be detected promptly on
-    ``close()``.  This is an acceptable trade-off for simplicity; the idle
-    CPU cost is negligible for typical throughput.
+    Note on polling: ``write()`` polls the queue every ``_QUEUE_TIMEOUT``
+    seconds rather than blocking indefinitely so that ``_cancel`` can be
+    detected promptly on ``close()``.  The idle CPU cost is negligible for
+    typical throughput.
     """
 
     def __init__(
@@ -192,7 +191,7 @@ class _QueueWriter:
             return 0
         while not self._cancel.is_set():
             try:
-                self._queue.put(data, timeout=0.05)
+                self._queue.put(data, timeout=_QUEUE_TIMEOUT)
                 return len(data)
             except queue.Full:
                 continue
@@ -284,6 +283,11 @@ class TerseStreamFile(io.RawIOBase):
         # Set by close() to abort the producer's queue.put() poll loop.
         self._cancel: threading.Event = threading.Event()
         # Producer stores real (non-cancellation) exceptions here.
+        # Written once by the producer thread before the sentinel is enqueued,
+        # read once by the consumer after the sentinel is dequeued.
+        # The queue itself provides the happens-before guarantee, so no lock
+        # is needed in CPython.  Under free-threaded Python 3.13 the list
+        # append / index-0 access is also atomic for single-element lists.
         self._error_box: list[Exception] = []
         # Set to True once the sentinel has been dequeued; broken if error.
         self._eof: bool = False
@@ -334,7 +338,7 @@ class TerseStreamFile(io.RawIOBase):
             # discard stale items to make room for the sentinel.
             while True:
                 try:
-                    self._queue.put(_QUEUE_SENTINEL, timeout=0.05)
+                    self._queue.put(_QUEUE_SENTINEL, timeout=_QUEUE_TIMEOUT)
                     break
                 except queue.Full:
                     if self._cancel.is_set():
@@ -360,6 +364,10 @@ class TerseStreamFile(io.RawIOBase):
     def _next_chunk(self) -> bytes:
         """Return the next chunk from the queue, or ``b""`` on EOF.
 
+        Blocks with a timeout and re-checks ``_cancel`` to avoid a permanent
+        block if the producer died without enqueuing the sentinel (e.g. if
+        the process receives SIGKILL while the producer is blocked on I/O).
+
         After the sentinel is received:
         - If a real error occurred, sets ``_broken`` and re-raises the
           exception on every subsequent call.
@@ -373,7 +381,20 @@ class TerseStreamFile(io.RawIOBase):
             raise RuntimeError("TerseStreamFile: stream is broken due to a prior error")
         if self._eof:
             return b""
-        chunk = self._queue.get()
+        while True:
+            try:
+                chunk = self._queue.get(timeout=_QUEUE_TIMEOUT)
+                break
+            except queue.Empty:
+                # Re-check whether the producer is still alive.  If it has
+                # exited without enqueuing the sentinel (abnormal), treat it
+                # as EOF so the consumer is never permanently blocked.
+                if not self._thread.is_alive() and self._queue.empty():
+                    if self._error_box:
+                        self._broken = True
+                        raise self._error_box[0]
+                    self._eof = True
+                    return b""
         if chunk is _QUEUE_SENTINEL:
             if self._error_box:
                 self._broken = True
@@ -381,6 +402,48 @@ class TerseStreamFile(io.RawIOBase):
             self._eof = True
             return b""
         return chunk  # type: ignore[return-value]
+
+    def _read_all(self) -> bytes:
+        """Read all remaining bytes from the queue."""
+        parts: list[bytes] = []
+        if self._leftover:
+            parts.append(self._leftover)
+            self._leftover = b""
+        while True:
+            chunk = self._next_chunk()
+            if not chunk:
+                break
+            parts.append(chunk)
+        return b"".join(parts)
+
+    def _read_sized(self, size: int) -> bytes:
+        """Read exactly *size* bytes (or less if EOF is reached)."""
+        parts: list[bytes] = []
+        remaining = size
+
+        if self._leftover:
+            if len(self._leftover) <= remaining:
+                parts.append(self._leftover)
+                remaining -= len(self._leftover)
+                self._leftover = b""
+            else:
+                parts.append(self._leftover[:remaining])
+                self._leftover = self._leftover[remaining:]
+                remaining = 0
+
+        while remaining > 0 and not self._eof and not self._broken:
+            chunk = self._next_chunk()
+            if not chunk:
+                break
+            if len(chunk) <= remaining:
+                parts.append(chunk)
+                remaining -= len(chunk)
+            else:
+                parts.append(chunk[:remaining])
+                self._leftover = chunk[remaining:]
+                remaining = 0
+
+        return b"".join(parts)
 
     # ------------------------------------------------------------------
     # io.RawIOBase interface
@@ -421,44 +484,8 @@ class TerseStreamFile(io.RawIOBase):
         if size == 0:
             return b""
         if size < 0:
-            # Read everything.
-            parts: list[bytes] = []
-            if self._leftover:
-                parts.append(self._leftover)
-                self._leftover = b""
-            while True:
-                chunk = self._next_chunk()
-                if not chunk:
-                    break
-                parts.append(chunk)
-            return b"".join(parts)
-
-        # Sized read — assemble exactly *size* bytes from leftover + queue.
-        parts = []
-        remaining = size
-        if self._leftover:
-            if len(self._leftover) <= remaining:
-                parts.append(self._leftover)
-                remaining -= len(self._leftover)
-                self._leftover = b""
-            else:
-                parts.append(self._leftover[:remaining])
-                self._leftover = self._leftover[remaining:]
-                remaining = 0
-
-        while remaining > 0 and not self._eof and not self._broken:
-            chunk = self._next_chunk()
-            if not chunk:
-                break
-            if len(chunk) <= remaining:
-                parts.append(chunk)
-                remaining -= len(chunk)
-            else:
-                parts.append(chunk[:remaining])
-                self._leftover = chunk[remaining:]
-                remaining = 0
-
-        return b"".join(parts)
+            return self._read_all()
+        return self._read_sized(size)
 
     def readinto(self, b: bytearray | memoryview) -> int:
         """Read bytes into a pre-allocated buffer.
@@ -495,7 +522,7 @@ class TerseStreamFile(io.RawIOBase):
                     self._queue.get_nowait()
                 except queue.Empty:
                     pass
-                self._thread.join(timeout=0.05)
+                self._thread.join(timeout=_QUEUE_TIMEOUT)
             # Final drain in case a last item arrived between the loop check
             # and the thread exiting.
             while True:
