@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
-from .base import TerseDecompresser
+from .core import _decompress_stream
 
 _DEFAULT_SPOOL_MAX_BYTES: int = 8 * 1024 * 1024  # 8 MB
 
@@ -69,10 +69,11 @@ class TerseFile(io.RawIOBase):
     def _ensure_decompressed(self) -> None:
         """Decompress source into the internal buffer if not done yet.
 
-        The source stream is passed directly as in_stream to
-        TerseDecompresser.create() — no full read() into RAM.  Output goes
-        into a SpooledTemporaryFile (or BytesIO when spool_max_bytes is None)
-        and is seeked back to position 0 when done.
+        Decompression is dispatched via ``core._decompress_stream`` (which uses
+        the optional Cython PACK accelerator when available, else pure Python).
+        Output goes into a SpooledTemporaryFile (or BytesIO when spool_max_bytes
+        is None) so large results spill to /tmp instead of RAM, and is seeked
+        back to position 0 when done.
 
         Raises ValueError if the file is already closed.
         """
@@ -97,13 +98,12 @@ class TerseFile(io.RawIOBase):
                 dir="/tmp",
             )
 
-        with TerseDecompresser.create(
+        _decompress_stream(
             self._source,
             out,  # type: ignore[arg-type]
             text_mode=self._text_mode,
             max_output_bytes=self._max_output_bytes,
-        ) as d:
-            d.decode()
+        )
 
         out.seek(0)
         self._buffer = out
