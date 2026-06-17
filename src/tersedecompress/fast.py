@@ -2,10 +2,9 @@
 Optional Cython acceleration dispatcher.
 
 The compiled extension :mod:`tersedecompress._terse_fast` is OPTIONAL.  When it
-is present (built via ``setup_fast.py``), PACK decompression runs the C core and
-streams its output to the target stream.  When it is absent — or the input uses
-the SPACK algorithm, which the C core does not implement — callers transparently
-fall back to the pure-Python decoder.
+is present (built via ``setup_fast.py``), both PACK and SPACK decompression run
+the C core and stream their output to the target stream.  When it is absent,
+callers transparently fall back to the pure-Python decoder.
 
 Nothing here imports the extension at call time on the hot path; the import is
 attempted exactly once at module load.
@@ -27,13 +26,13 @@ _SPACE_CODE: int = 1 + ASC_TO_EBC_DEF[ord(" ")]
 
 
 def is_available() -> bool:
-    """Return True if the compiled PACK accelerator is importable."""
+    """Return True if the compiled accelerator is importable."""
     return _terse_fast is not None
 
 
 def can_accelerate(header: TerseHeader) -> bool:
-    """Return True if *header* describes a stream the C core can decode (PACK)."""
-    return _terse_fast is not None and not header.spack_flag
+    """Return True if the C core can decode *header* (PACK or SPACK)."""
+    return _terse_fast is not None
 
 
 def run(
@@ -43,11 +42,12 @@ def run(
     *,
     max_output_bytes: int | None = None,
 ) -> int:
-    """Decode a PACK stream with the C core, writing to *out_stream*.
+    """Decode a PACK or SPACK stream with the C core, writing to *out_stream*.
 
     The header must already have been parsed from *in_stream* (so the stream is
     positioned at the start of the compressed payload).  ``header.text_flag``
-    selects EBCDIC→ASCII text mode, mirroring the pure-Python path.
+    selects EBCDIC→ASCII text mode, mirroring the pure-Python path; the
+    algorithm (PACK vs SPACK) is chosen from ``header.spack_flag``.
 
     Returns the number of decompressed bytes written.
 
@@ -59,7 +59,8 @@ def run(
         raise RuntimeError("Cython accelerator is not available")
 
     payload = in_stream.read()
-    return _terse_fast.decode_pack(
+    decode = _terse_fast.decode_spack if header.spack_flag else _terse_fast.decode_pack
+    return decode(
         payload,
         header.record_length,
         header.host_flag,

@@ -68,18 +68,20 @@ careful pure-Python tuning (reading the whole input at once, pre-unpacking the
 magnitude. The work is also strictly sequential (the adaptive dictionary
 depends on every preceding code), so it cannot be parallelised.
 
-Those facts motivated an **optional** Cython core for the PACK algorithm
-(`src/tersedecompress/_terse_fast.pyx`): the four dictionaries become C `int`
-arrays, the 12-bit reader is inlined over a contiguous buffer, and output is
-streamed to the target stream from a C buffer. It is **byte-for-byte identical**
-to the pure-Python decoder (binary/text, FB/VB) and runs **~90–95× faster
-(~55 MB/s)** — a 1 GB file in well under a minute.
+Those facts motivated an **optional** Cython core for **both** algorithms
+(`src/tersedecompress/_terse_fast.pyx`): for PACK the four dictionaries become
+C `int` arrays; for SPACK the adaptive Huffman tree (`_TreeRecord`) becomes four
+parallel C `int` arrays with an explicit C stack. In both cases the 12-bit
+reader is inlined over a contiguous buffer and output is streamed to the target
+stream from a C buffer. The result is **byte-for-byte identical** to the
+pure-Python decoder (PACK/SPACK, binary/text, FB/VB — verified against the full
+upstream test-data corpus) and runs **~90× faster (~50–55 MB/s)** — a 1 GB file
+in well under a minute.
 
 The accelerator is entirely opt-in and self-contained:
 
 - `pip install tersedecompress` stays **pure-Python** and needs no compiler.
-- If the compiled extension is *not* present — or the input uses **SPACK**,
-  which the C core does not implement — the library falls back to the
+- If the compiled extension is *not* present, the library falls back to the
   pure-Python decoder automatically. Same API, same output.
 
 ### Building and using the `.so`
@@ -93,8 +95,8 @@ This compiles the extension into a shared library next to the package sources,
 e.g. `src/tersedecompress/_terse_fast.cpython-311-x86_64-linux-gnu.so`. **Using
 it requires no code changes whatsoever:** as long as that `.so` sits beside the
 installed `tersedecompress` package, it is imported automatically and every
-`decompress()`, `decompress_file()` and `tersedecompress.open()` call on a PACK
-stream transparently uses the fast path. To confirm it is active:
+`decompress()`, `decompress_file()` and `tersedecompress.open()` call (PACK or
+SPACK) transparently uses the fast path. To confirm it is active:
 
 ```python
 import tersedecompress.fast as fast
