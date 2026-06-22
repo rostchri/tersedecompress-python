@@ -168,11 +168,16 @@ class TerseDecompresser(ABC):
             self.end_record()
 
     def close(self) -> None:
-        """Flush any remaining data and close streams."""
+        """Flush any remaining data.
+
+        The caller (or the context manager that owns the stream) is responsible
+        for closing the input and output streams.  ``TerseDecompresser`` does
+        not close streams it did not open, following the standard Python
+        convention that you do not close what you do not own.
+        """
         if self._record or (self.text_flag and self.variable_flag):
             self.end_record()
         self._out.flush()
-        self._input.close()
 
     # ------------------------------------------------------------------
     # Context-manager support

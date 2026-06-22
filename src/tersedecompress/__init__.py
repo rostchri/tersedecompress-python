@@ -11,9 +11,13 @@ Public API::
     # Decompress a file (text mode: EBCDIC → ASCII + newline conversion)
     decompress_file("input.tersed", "output.txt", text_mode=True)
 
-    # File-like API (analogous to gzip.open)
+    # Seekable file-like API (analogous to gzip.open):
     with tersedecompress.open("input.tersed") as f:
         content = f.read()
+
+    # Streaming forward-only API (no temp file, no seek):
+    with tersedecompress.open("input.tersed", streaming=True) as f:
+        shutil.copyfileobj(f, output_stream)
 """
 
 import builtins
@@ -22,7 +26,7 @@ from typing import BinaryIO
 
 from .base import TerseDecompresser
 from .core import decompress, decompress_file
-from .file import TerseFile
+from .file import TerseFile, TerseStreamFile
 
 
 def open(
@@ -30,56 +34,90 @@ def open(
     text_mode: bool = False,
     max_output_bytes: int | None = None,
     spool_max_bytes: int | None = 8 * 1024 * 1024,
-) -> TerseFile:
+    streaming: bool = False,
+    chunk_buffer_count: int = 64,
+) -> TerseFile | TerseStreamFile:
     """Open a TERSE-compressed file for reading, analogous to gzip.open().
 
     Args:
-        source:           File path (str/Path) or an already-open binary stream
-                          to decompress.
-        text_mode:        If True, convert EBCDIC to ASCII during decompression.
-        max_output_bytes: Maximum decompressed size (None = unlimited).
-        spool_max_bytes:  Decompressed output is kept in RAM below this
-                          threshold and spilled to a /tmp file above it.
-                          Pass 0 to always use disk; pass None for unlimited
-                          RAM (legacy behaviour).  Default: 8 MB.
+        source:             File path (str/Path) or an already-open binary
+                            stream to decompress.
+        text_mode:          If True, convert EBCDIC to ASCII during
+                            decompression.
+        max_output_bytes:   Maximum decompressed size (None = unlimited).
+        spool_max_bytes:    Decompressed output is kept in RAM below this
+                            threshold and spilled to a /tmp file above it.
+                            Pass 0 to always use disk; pass None for unlimited
+                            RAM (legacy behaviour).  Default: 8 MB.
+                            Ignored when *streaming=True*.
+        streaming:          If True, return a :class:`TerseStreamFile` —
+                            a forward-only, no-seek, no-temp-file stream that
+                            decompresses on the fly in a background thread.
+                            Both the pure-Python and Cython/C accelerated
+                            paths are supported in streaming mode.
+                            Ideal for ``shutil.copyfileobj``, piping to a
+                            subprocess stdin, or any single-pass consumer.
+                            If False (default), return a seekable
+                            :class:`TerseFile` backed by a SpooledTemporaryFile
+                            (or BytesIO when *spool_max_bytes* is None).
+        chunk_buffer_count: Maximum number of decompressed chunks to buffer
+                            in the internal queue when *streaming=True*.
+                            Ignored when *streaming=False*.  Default: 64.
 
     Returns:
-        TerseFile: A readable, seekable file-like object with decompressed
-        content.
+        :class:`TerseFile` when *streaming=False* (default), or
+        :class:`TerseStreamFile` when *streaming=True*.
 
-    Example:
+    Example::
+
+        # Seekable (default), with SpooledTemporaryFile spill-to-disk:
         with tersedecompress.open("data.tersed") as f:
             content = f.read()
 
-        with tersedecompress.open("data.tersed") as f:
-            while chunk := f.read(4096):
+        # Seekable, always keep in RAM (legacy):
+        with tersedecompress.open("data.tersed", spool_max_bytes=None) as f:
+            content = f.read()
+
+        # Streaming forward-only (no temp file, no seek, Cython-accelerated):
+        with tersedecompress.open("data.tersed", streaming=True) as f:
+            shutil.copyfileobj(f, output_stream)
+
+        with tersedecompress.open("data.tersed", streaming=True) as f:
+            for chunk in iter(lambda: f.read(4096), b""):
                 process(chunk)
     """
-    if isinstance(source, (str, Path)):
+    close_source = isinstance(source, (str, Path))
+    if close_source:
         stream: BinaryIO = builtins.open(Path(source), "rb")  # type: ignore[assignment]
-        try:
-            return TerseFile(
+    else:
+        stream = source  # type: ignore[assignment]
+
+    try:
+        if streaming:
+            return TerseStreamFile(
                 stream,
                 text_mode=text_mode,
                 max_output_bytes=max_output_bytes,
-                spool_max_bytes=spool_max_bytes,
-                _close_source=True,
+                chunk_buffer_count=chunk_buffer_count,
+                _close_source=close_source,
             )
-        except Exception:
+        return TerseFile(
+            stream,
+            text_mode=text_mode,
+            max_output_bytes=max_output_bytes,
+            spool_max_bytes=spool_max_bytes,
+            _close_source=close_source,
+        )
+    except Exception:
+        if close_source:
             stream.close()
-            raise
-    return TerseFile(
-        source,
-        text_mode=text_mode,
-        max_output_bytes=max_output_bytes,
-        spool_max_bytes=spool_max_bytes,
-        _close_source=False,
-    )
+        raise
 
 
 __all__ = [
     "TerseDecompresser",
     "TerseFile",
+    "TerseStreamFile",
     "decompress",
     "decompress_file",
     "open",
