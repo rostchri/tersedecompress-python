@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=61", "wheel", "cython>=3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -34,6 +34,9 @@ tersedecompress = "tersedecompress.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.exclude-package-data]
+tersedecompress = ["*.c", "*.pyx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
